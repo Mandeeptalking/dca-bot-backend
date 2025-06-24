@@ -1,78 +1,88 @@
-# run_dca_bot.py
+from datetime import datetime
+from app.supabase_client import supabase
+from app.services.status_transition import (
+    update_bot_status,
+    log_bot_event,
+    update_bot_run_status,
+    get_latest_run_id
+)
 
-from app.services.fetch_and_validate import fetch_and_validate_bot
-from app.services.place_initial_order import place_initial_order
-from app.services.calculate_dca_levels import calculate_dca_levels
-from app.services.calculate_take_profit import calculate_take_profit_levels
-from app.services.calculate_stop_pause import calculate_stop_pause_levels
-from app.services.log_bot_plan import log_bot_plan
-from app.services.finalize_bot_run import finalize_bot_run
-
+def place_initial_order(order_type, trading_pair, amount, limit_price=None):
+    print(f"🛒 Placing {order_type.upper()} order for {trading_pair} - Amount: {amount}, Limit: {limit_price}")
+    if order_type == "limit" and not limit_price:
+        raise ValueError("Limit order requires a limit price")
+    return {
+        "status": "placed",
+        "order_type": order_type,
+        "pair": trading_pair,
+        "amount": amount,
+        "limit_price": limit_price,
+        "placed_at": datetime.utcnow().isoformat()
+    }
 
 def run_dca_bot(bot_id: str, user_id: str):
-    """
-    Master function to run the full DCA bot setup.
-    """
-    print(f"⚙️ Starting run_dca_bot for bot_id={bot_id}, user_id={user_id}")
+    print(f"🚀 Running DCA bot for bot_id={bot_id}")
 
-    # Step 1: Fetch + Validate
-    print("✅ Step 1: Fetching and validating bot...")
-    bot, keys = fetch_and_validate_bot(bot_id, user_id)
-    print("✔️ Bot fetched and validated")
+    # Fetch bot config
+    bot_resp = supabase.table("bots").select("*").eq("bot_id", bot_id).limit(1).execute()
+    if not bot_resp.data:
+        return {"error": "Bot not found"}
 
-    # Step 2: Place Initial Order
-    print("✅ Step 2: Placing initial order...")
-    initial_order = place_initial_order(bot, keys)
-    entry_price = initial_order["price"]
-    print(f"✔️ Initial order placed at price: {entry_price}")
+    bot = bot_resp.data[0]
 
-    # Step 3: Calculate DCA levels
-    print("✅ Step 3: Calculating DCA levels...")
-    dca_levels = calculate_dca_levels(bot, entry_price)
-    print(f"✔️ DCA levels calculated: {len(dca_levels)} levels")
-
-    # Step 4: Calculate Take Profit levels
-    print("✅ Step 4: Calculating take profit levels...")
-    tp_levels = calculate_take_profit_levels(bot, avg_entry_price=entry_price)
-    print(f"✔️ Take profit levels calculated: {len(tp_levels)} targets")
-
-    # Step 4b: Calculate Stop and Pause conditions
-    print("✅ Step 4b: Calculating stop and pause conditions...")
-    stop_pause = calculate_stop_pause_levels(bot, avg_entry=entry_price, last_entry=entry_price)
-    print(f"✔️ Stop/Pause calculated → Stop: {len(stop_pause.get('stop', []))}, Pause: {len(stop_pause.get('pause', []))}")
-
-    # Step 5: Log full trade plan
-    try:
-        print("✅ Step 5: Logging trade plan to Supabase...")
-        log_bot_plan(
-            bot_id=bot_id,
-            symbol=bot["trading_pair"],
-            dca_levels=dca_levels,
-            tp_levels=tp_levels,
-            stop_pause=stop_pause
-        )
-        print("📦 Supabase insert assumed successful (no error returned)")
-        print("✔️ Trade plan logged")
-    except Exception as e:
-        print(f"❌ Failed in log_bot_plan: {e}")
-        raise
-
-    # Step 6: Finalize and update bot status
-    try:
-        print("✅ Step 6: Finalizing and updating bot status...")
-        run_id = finalize_bot_run(bot)
-        print(f"✔️ Bot run finalized with run_id: {run_id}")
-    except Exception as e:
-        print(f"❌ Failed in finalize_bot_run: {e}")
-        raise
-
-    return {
-        "status": "started",
+    # 1. Create a new run
+    run_payload = {
         "bot_id": bot_id,
-        "run_id": run_id,  # ✅ Consistent naming
-        "initial_price": entry_price,
-        "dca_steps": len(dca_levels),
-        "tp_targets": len(tp_levels),
-        "stop_conditions": len(stop_pause.get("stop", [])),
-        "pause_conditions": len(stop_pause.get("pause", []))
+        "user_id": user_id,
+        "status": "running",
+        "started_at": datetime.utcnow().isoformat(),
     }
+
+    run_resp = supabase.table("bot_runs").insert(run_payload).execute()
+    if not run_resp.data:
+        return {"error": "Failed to start bot run"}
+
+    run_id = run_resp.data[0]["run_id"]
+    update_bot_status(bot_id, "running")
+
+    try:
+        # 2. Place initial order if required
+        trading_pair = bot.get("trading_pair")
+        initial_amount = bot.get("initial_order_amount")
+        order_type = bot.get("order_type", "").lower()
+        limit_price = bot.get("initial_order_limit_price")
+
+        if order_type == "market":
+            order_result = place_initial_order("market", trading_pair, initial_amount)
+            log_bot_event(run_id, bot_id, user_id, "initial_order_placed", order_result)
+
+        elif order_type == "limit":
+            if not limit_price:
+                raise ValueError("Limit price required for limit order")
+            order_result = place_initial_order("limit", trading_pair, initial_amount, limit_price)
+            log_bot_event(run_id, bot_id, user_id, "initial_order_placed", order_result)
+
+        elif order_type in ["conditional_market", "conditional_limit"]:
+            print(f"⏳ Waiting for webhook to trigger {order_type.upper().replace('_', ' ')}")
+            log_bot_event(run_id, bot_id, user_id, "waiting_for_condition", {
+                "order_type": order_type
+            })
+            update_bot_run_status(run_id, "waiting")
+            return {"status": "waiting", "reason": order_type}
+
+        else:
+            raise ValueError(f"Invalid order type: {order_type}")
+
+        # TODO: Continue DCA logic here later
+
+        update_bot_run_status(run_id, "completed")
+        update_bot_status(bot_id, "completed")
+
+        return {"status": "completed", "initial_order": order_result}
+
+    except Exception as e:
+        print(f"❌ Bot execution failed: {e}")
+        update_bot_run_status(run_id, "failed")
+        update_bot_status(bot_id, "error")
+        log_bot_event(run_id, bot_id, user_id, "error", {"message": str(e)})
+        return {"error": str(e)}
