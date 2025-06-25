@@ -37,3 +37,8 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"message": "Backend is healthy"}
+
+@app.get("/test-webhook")
+def test_webhook():
+    return {"message": "Webhook working!"}
+

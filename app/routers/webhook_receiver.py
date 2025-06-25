@@ -24,6 +24,15 @@ async def receive_condition_webhook_url(token: str):
 def test_webhook():
     return {"message": "webhook router is working"}
 
+@router.post("/wc/{token}")
+async def receive_condition_webhook_post(token: str):
+    return await handle_condition_trigger(token)
+
+@router.get("/wc/{token}")
+async def receive_condition_webhook_get(token: str):
+    return await handle_condition_trigger(token)
+
+
 async def handle_condition_trigger(token: str):
     # 1. Find the matching condition
     response = (
