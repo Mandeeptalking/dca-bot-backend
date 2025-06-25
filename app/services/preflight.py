@@ -40,18 +40,26 @@ def validate_bot(bot_id: str, user_id: str) -> Tuple[bool, dict | None, List[str
         errors.append("Bot must be inactive or stopped to start.")
 
     # 4. Required fields check
+    order_type = bot.get("order_type")
     required_fields = [
         "trading_pair", "initial_amount", "order_type",
         "dca_orders", "max_dca_orders", "dca_amount_mode",
         "required_capital", "take_profit"
     ]
+
+    # Skip initial_amount check for conditional order types
+    if order_type in ["conditional_market", "conditional_limit"]:
+        required_fields = [f for f in required_fields if f != "initial_amount"]
+
     for field in required_fields:
-        if not bot.get(field):
+        if field not in bot or bot[field] in [None, ""]:
             errors.append(f"Missing required field: {field}")
 
     # 5. Order type validation
-    if bot["order_type"] == "limit" and not bot.get("limit_price"):
+    if order_type == "limit" and not bot.get("limit_price"):
         errors.append("Limit price is required for limit order type.")
+    elif order_type == "conditional_limit" and not bot.get("limit_price"):
+        warnings.append("Limit price will be required when the condition is triggered.")
 
     # 6. DCA mode validation
     if bot["dca_amount_mode"] == "fixed" and not bot.get("fixed_amount"):
@@ -62,6 +70,7 @@ def validate_bot(bot_id: str, user_id: str) -> Tuple[bool, dict | None, List[str
     # 7. Check exchange connection
     if not bot.get("exchange"):
         errors.append("Exchange is not specified.")
+        exchange_keys = None
     else:
         exchange_keys = get_user_exchange_keys(user_id, bot["exchange"])
         if not exchange_keys:
@@ -71,9 +80,12 @@ def validate_bot(bot_id: str, user_id: str) -> Tuple[bool, dict | None, List[str
     if not errors and exchange_keys:
         balance = get_mock_balance(bot["exchange"], exchange_keys)
 
-        if balance < bot["initial_amount"]:
-            errors.append("❌ Insufficient balance to place initial order.")
-        elif balance < bot["required_capital"]:
+        # Only check initial amount for non-conditional bots
+        if order_type not in ["conditional_market", "conditional_limit"]:
+            if balance < bot["initial_amount"]:
+                errors.append("❌ Insufficient balance to place initial order.")
+
+        if balance < bot["required_capital"]:
             warnings.append("⚠️ Balance is below required capital. Bot will start but may not complete all DCA steps.")
 
     # 9. Check take profit conditions

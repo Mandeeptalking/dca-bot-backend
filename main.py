@@ -1,6 +1,10 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import bots, exchange_keys
+
+from app.routers import bots, exchange_keys, webhook_receiver  # ✅ added webhook_receiver
+from app.services.evaluator import evaluate_condition_groups
+
+evaluate_condition_groups()  # runs once at startup for testing
 
 app = FastAPI()
 
@@ -24,6 +28,7 @@ async def log_requests(request: Request, call_next):
 # 📦 Register routers
 app.include_router(bots.router, prefix="/bots", tags=["Bots"])
 app.include_router(exchange_keys.router, prefix="/exchange-keys", tags=["Exchange Keys"])
+app.include_router(webhook_receiver.router, tags=["Webhook Receiver"])  # ✅ new router
 
 @app.get("/")
 def read_root():

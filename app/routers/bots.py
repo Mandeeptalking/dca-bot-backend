@@ -112,3 +112,18 @@ def delete_bot(request: StartBotRequest):
         return {"status": "deleted", "message": "Bot and related data deleted"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete bot: {e}")
+
+@router.get("/{bot_id}/logs")
+async def get_bot_logs(bot_id: str, limit: int = 50):
+    try:
+        result = (
+            supabase.table("bot_logs")
+            .select("*")
+            .eq("bot_id", bot_id)
+            .order("timestamp", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching logs: {str(e)}")
