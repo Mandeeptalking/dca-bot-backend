@@ -16,25 +16,14 @@ async def receive_condition_webhook(request: Request):
     return await handle_condition_trigger(token)
 
 
-@router.get("/wc/{token}")
+# ✅ FIXED: Accept both GET and POST from external sources like TradingView
+@router.api_route("/wc/{token}", methods=["GET", "POST"])
 async def receive_condition_webhook_url(token: str):
-    return await handle_condition_trigger(token)
-
-@router.get("/test-webhook")
-def test_webhook():
-    return {"message": "webhook router is working"}
-
-@router.post("/wc/{token}")
-async def receive_condition_webhook_post(token: str):
-    return await handle_condition_trigger(token)
-
-@router.get("/wc/{token}")
-async def receive_condition_webhook_get(token: str):
     return await handle_condition_trigger(token)
 
 
 async def handle_condition_trigger(token: str):
-    # 1. Find the matching condition
+    # 1. Lookup matching condition using token
     response = (
         supabase.table("bot_conditions")
         .select("*")
@@ -52,7 +41,7 @@ async def handle_condition_trigger(token: str):
     bot_id = condition["bot_id"]
     validity_secs = condition.get("validity_secs", 300)
 
-    # 2. Check if already triggered and still valid
+    # 2. Check if already triggered and still within valid duration
     if condition["status"] == "triggered":
         triggered_at = datetime.fromisoformat(condition["triggered_at"].replace("Z", "+00:00"))
         now = datetime.now(timezone.utc)
@@ -63,7 +52,7 @@ async def handle_condition_trigger(token: str):
                 "triggered_at": condition["triggered_at"]
             }
 
-    # 3. Update status to triggered
+    # 3. Update condition as triggered
     now_utc = datetime.now(timezone.utc).isoformat()
     update_resp = (
         supabase.table("bot_conditions")
@@ -78,7 +67,7 @@ async def handle_condition_trigger(token: str):
     if getattr(update_resp, "error", None):
         raise HTTPException(status_code=500, detail="Failed to update condition")
 
-    # 4. Log this event to bot_logs
+    # 4. Log event
     supabase.table("bot_logs").insert({
         "bot_id": bot_id,
         "event": "condition_triggered",
@@ -90,7 +79,7 @@ async def handle_condition_trigger(token: str):
         "timestamp": now_utc
     }).execute()
 
-    # 5. Trigger group evaluation
+    # 5. Trigger bot condition group evaluator
     evaluate_condition_groups()
 
     return {
