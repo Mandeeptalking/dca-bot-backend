@@ -49,8 +49,16 @@ def run_dca_bot(bot_id: str, user_id: str):
         # 2. Place initial order if required
         trading_pair = bot.get("trading_pair")
         initial_amount = bot.get("initial_order_amount")
-        order_type = bot.get("order_type", "").lower()
+        order_type_raw = bot.get("order_type")
+        order_type = order_type_raw.strip().replace(" ", "_").lower() if order_type_raw else ""
         limit_price = bot.get("initial_order_limit_price")
+
+        print("📦 Order type received:", order_type_raw, "->", order_type)
+
+        # Validate order type
+        valid_order_types = ["market", "limit", "conditional_market", "conditional_limit"]
+        if order_type not in valid_order_types:
+            raise ValueError(f"Invalid order type: '{order_type_raw}' (normalized: '{order_type}')")
 
         if order_type == "market":
             order_result = place_initial_order("market", trading_pair, initial_amount)
@@ -68,17 +76,16 @@ def run_dca_bot(bot_id: str, user_id: str):
                 "order_type": order_type
             })
             update_bot_run_status(run_id, "waiting")
-            return {"status": "waiting", "reason": order_type}
-
-        else:
-            raise ValueError(f"Invalid order type: {order_type}")
-
-        # TODO: Continue DCA logic here later
+            return {"status": "waiting", "reason": order_type, "run_id": run_id}
 
         update_bot_run_status(run_id, "completed")
         update_bot_status(bot_id, "completed")
 
-        return {"status": "completed", "initial_order": order_result}
+        return {
+            "status": "completed",
+            "run_id": run_id,
+            "initial_order": order_result
+        }
 
     except Exception as e:
         print(f"❌ Bot execution failed: {e}")
