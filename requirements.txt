@@ -4,3 +4,4 @@ supabase
 python-dotenv
 requests
 cryptography
+python-binance

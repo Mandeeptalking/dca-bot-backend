@@ -1,13 +1,11 @@
-# fetch_and_validate.py
-
 from app.supabase_client import supabase
 from app.utils.crypto import decrypt
 from app.services.supabase_queries import get_user_exchange_keys
 from fastapi import HTTPException
 
-def fetch_and_validate_bot(bot_id: str, user_id: str) -> tuple:
+def fetch_and_validate_bot(bot_id: str, user_id: str, allow_running: bool = False) -> tuple:
     """
-    Step 1: Fetch bot config, validate status, and fetch/decrypt exchange keys.
+    Fetch bot config, validate status, and fetch/decrypt exchange keys.
     Returns: (bot_config: dict, decrypted_keys: dict)
     Raises: HTTPException on validation failure
     """
@@ -27,8 +25,8 @@ def fetch_and_validate_bot(bot_id: str, user_id: str) -> tuple:
 
     bot = response.data[0]
 
-    # 2. Ensure bot is inactive
-    if bot["status"] not in ["inactive", "stopped"]:
+    # 2. Status validation
+    if not allow_running and bot["status"] not in ["inactive", "stopped"]:
         raise HTTPException(status_code=400, detail="Bot must be inactive or stopped to start")
 
     # 3. Fetch and decrypt exchange keys

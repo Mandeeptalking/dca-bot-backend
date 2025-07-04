@@ -1,9 +1,17 @@
-# preflight.py
-
+import os
 from typing import Tuple, List
+from cryptography.fernet import Fernet
+
 from app.supabase_client import supabase
 from app.services.supabase_queries import get_user_exchange_keys, is_bot_already_running
-from app.services.exchange_client import get_mock_balance
+from app.services.exchange_client import get_exchange_client
+
+
+FERNET_KEY = os.getenv("FERNET_KEY")
+if FERNET_KEY is None:
+    raise ValueError("Missing FERNET_KEY in environment.")
+fernet = Fernet(FERNET_KEY.encode())
+
 
 
 def validate_bot(bot_id: str, user_id: str) -> Tuple[bool, dict | None, List[str]]:
@@ -47,9 +55,8 @@ def validate_bot(bot_id: str, user_id: str) -> Tuple[bool, dict | None, List[str
         "required_capital", "take_profit"
     ]
 
-    # Skip initial_amount check for conditional order types
     if order_type in ["conditional_market", "conditional_limit"]:
-        required_fields = [f for f in required_fields if f != "initial_amount"]
+        required_fields.remove("initial_amount")
 
     for field in required_fields:
         if field not in bot or bot[field] in [None, ""]:
@@ -68,27 +75,46 @@ def validate_bot(bot_id: str, user_id: str) -> Tuple[bool, dict | None, List[str
         errors.append("Multiplier is required for progressive DCA mode.")
 
     # 7. Check exchange connection
+    exchange_keys = None
     if not bot.get("exchange"):
         errors.append("Exchange is not specified.")
-        exchange_keys = None
     else:
         exchange_keys = get_user_exchange_keys(user_id, bot["exchange"])
+        print("🔍 exchange_keys:", exchange_keys)
+
         if not exchange_keys:
             errors.append("No exchange keys connected for this user and exchange.")
 
-    # 8. Check balance if keys are valid
+    # 8. Decrypt and validate keys + check balance
     if not errors and exchange_keys:
-        balance = get_mock_balance(bot["exchange"], exchange_keys)
+        try:
+            api_key_encrypted = exchange_keys["api_key_encrypted"]
+            api_secret_encrypted = exchange_keys["api_secret_encrypted"]
 
-        # Only check initial amount for non-conditional bots
-        if order_type not in ["conditional_market", "conditional_limit"]:
-            if balance < bot["initial_amount"]:
-                errors.append("❌ Insufficient balance to place initial order.")
+            api_key = fernet.decrypt(api_key_encrypted.encode()).decode()
+            api_secret = fernet.decrypt(api_secret_encrypted.encode()).decode()
 
-        if balance < bot["required_capital"]:
-            warnings.append("⚠️ Balance is below required capital. Bot will start but may not complete all DCA steps.")
+            client = get_exchange_client(
+                exchange=bot["exchange"],
+                api_key=api_key,
+                api_secret=api_secret
+            )
 
-    # 9. Check take profit conditions
+            # Test connection with mock balance fetch
+            balance_dict = client.get_mock_balance()
+            balance = balance_dict.get("USDT", 0.0)
+
+            if order_type not in ["conditional_market", "conditional_limit"]:
+                if balance < bot["initial_amount"]:
+                    errors.append("❌ Insufficient balance to place initial order.")
+
+            if balance < bot["required_capital"]:
+                warnings.append("⚠️ Balance is below required capital. Bot will start but may not complete all DCA steps.")
+
+        except Exception as e:
+            errors.append(f"Failed to connect to exchange client: {str(e)}")
+
+    # 9. Check take profit targets
     take_profit = bot.get("take_profit", {})
     if not take_profit.get("targets"):
         errors.append("At least one take profit target is required.")

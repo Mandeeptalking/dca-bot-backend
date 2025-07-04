@@ -12,10 +12,7 @@ from app.services.status_transition import (
 )
 from app.services.bot_service import delete_bot_completely
 
-
-
 router = APIRouter()
-
 
 # ✅ Get single bot config by bot_id
 @router.get("/{bot_id}")
@@ -50,9 +47,13 @@ def start_bot(request: StartBotRequest):
     try:
         result = run_dca_bot(request.bot_id, request.user_id)
         print("🚀 Bot engine result:", result)
-        result["messages"] = messages
 
-        run_id = result.get("run_id")
+        if result is None:
+            raise HTTPException(status_code=500, detail="Bot engine returned no result")
+
+        result["messages"] = ", ".join(messages)
+
+        run_id = result.get("run_id") if isinstance(result, dict) else None
         if run_id:
             log_bot_event(
                 run_id=run_id,
@@ -68,7 +69,6 @@ def start_bot(request: StartBotRequest):
         print("❌ Exception in run_dca_bot:", str(e))
         raise HTTPException(status_code=500, detail="Internal server error: " + str(e))
 
-
 @router.post("/pause")
 def pause_bot(request: StartBotRequest):
     update_bot_status(request.bot_id, "paused")
@@ -80,7 +80,6 @@ def pause_bot(request: StartBotRequest):
         print("⚠️ Warning: No active run_id found, skipping pause log.")
     return {"status": "paused", "message": "Bot paused successfully"}
 
-
 @router.post("/resume")
 def resume_bot(request: StartBotRequest):
     update_bot_status(request.bot_id, "running")
@@ -91,8 +90,6 @@ def resume_bot(request: StartBotRequest):
     else:
         print("⚠️ Warning: No active run_id found, skipping resume log.")
     return {"status": "running", "message": "Bot resumed successfully"}
-
-
 
 @router.post("/stop")
 def stop_bot(request: StartBotRequest):

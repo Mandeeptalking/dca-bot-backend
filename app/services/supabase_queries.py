@@ -1,6 +1,7 @@
 from app.supabase_client import supabase
 
 # ✅ Fetch connected exchange keys for a user and exchange
+
 def get_user_exchange_keys(user_id: str, exchange: str):
     response = (
         supabase
@@ -13,7 +14,11 @@ def get_user_exchange_keys(user_id: str, exchange: str):
     )
     if not response.data or len(response.data) == 0:
         return None
+
+    # ✅ Return first item directly
     return response.data[0]
+
+
 
 # ✅ Check if the bot is already running (used during preflight)
 def is_bot_already_running(bot_id: str) -> bool:

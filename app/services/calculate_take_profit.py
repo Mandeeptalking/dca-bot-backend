@@ -1,9 +1,12 @@
-# calculate_take_profit.py
-
 def calculate_take_profit_levels(bot: dict, avg_entry_price: float) -> list:
     """
-    Step 4: Convert take profit targets (percentage) into absolute price levels.
-    Returns a list of dicts with price target, size %, and step.
+    Convert take profit targets into absolute price levels.
+
+    Each take profit step includes:
+    - trigger_price: calculated from avg_entry_price * (1 + trigger_pct / 100)
+    - trigger_pct: the % gain from entry
+    - position_size: % of position to exit
+    - step: order of execution
     """
     tp_config = bot.get("take_profit", {})
     targets = tp_config.get("targets", [])
@@ -13,8 +16,9 @@ def calculate_take_profit_levels(bot: dict, avg_entry_price: float) -> list:
 
     levels = []
     for i, tp in enumerate(targets):
-        trigger_pct = tp.get("triggerPrice")
-        position_size = tp.get("positionSize")
+        # Normalize keys from frontend if needed
+        trigger_pct = tp.get("triggerPrice") or tp.get("trigger_pct")
+        position_size = tp.get("positionSize") or tp.get("position_size")
 
         if trigger_pct is None or position_size is None:
             continue
